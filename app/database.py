@@ -1,15 +1,12 @@
 import os
-import redis
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
+import asyncpg
 
-load_dotenv()
+# 严格从环境变量读取 PostgreSQL URL
+POSTGRES_URL = os.environ["POSTGRES_URL"]
 
-# Redis 连接
-redis_client = redis.from_url(os.getenv("REDIS_URL"), decode_responses=True)
-
-# PostgreSQL 连接
-DATABASE_URL = os.getenv("POSTGRES_URL")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+async def test_postgres_connection():
+    """连接 PostgreSQL 测试并返回版本"""
+    conn = await asyncpg.connect(POSTGRES_URL)
+    version = await conn.fetchval("SELECT version()")
+    await conn.close()
+    return version

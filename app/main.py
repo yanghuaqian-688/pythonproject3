@@ -1,30 +1,36 @@
-from fastapi import FastAPI, Depends
-from sqlalchemy.orm import Session
-from .database import redis_client, SessionLocal
+from dotenv import load_dotenv
+load_dotenv()
 
-app = FastAPI()
+from fastapi import FastAPI, Request
+from app.redis_client import init_redis
+import uuid
 
-# PostgreSQL 会话依赖
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+app = FastAPI(title="AI Worker Demo")
 
-@app.get("/")
-def read_root():
-    redis_client.set("message", "Hello Redis + FastAPI!")
-    value = redis_client.get("message")
-    return {"redis_value": value}
+@app.on_event("startup")
+async def startup_event():
+    app.state.redis = await init_redis()
+    print("✅ Redis 已初始化")
 
-@app.get("/increment")
-def increment_counter():
-    count = redis_client.incr("counter")
-    return {"counter": count}
+@app.post("/ask")
+async def ask(request: Request):
+    data = await request.json()
+    question = data.get("question", "").strip()
+    if not question:
+        return {"error": "请提供问题"}
 
-@app.get("/db-test")
-def db_test(db: Session = Depends(get_db)):
-    # 简单测试 PostgreSQL 连接
-    result = db.execute("SELECT version();").fetchone()
-    return {"postgres_version": result[0]}
+    redis = app.state.redis
+    task_id = str(uuid.uuid4())
+
+    await redis.lpush("task_queue", task_id)
+    await redis.hset(f"task:{task_id}", mapping={"question": question, "status": "pending"})
+
+    return {"task_id": task_id, "status": "pending"}
+
+@app.get("/task/{task_id}")
+async def get_task(task_id: str):
+    redis = app.state.redis
+    task = await redis.hgetall(f"task:{task_id}")
+    if not task:
+        return {"error": "任务不存在"}
+    return task
